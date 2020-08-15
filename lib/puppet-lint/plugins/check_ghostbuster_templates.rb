@@ -1,3 +1,5 @@
+require 'puppet-ghostbuster/puppetdb'
+
 class PuppetLint::Checks
   def load_data(path, content)
     lexer = PuppetLint::Lexer.new
@@ -13,37 +15,22 @@ class PuppetLint::Checks
 end
 
 PuppetLint.new_check(:ghostbuster_templates) do
-  def manifests
-    Dir.glob('./**/manifests/**/*.pp')
-  end
-
-  def templates
-    Dir.glob('./**/templates/**/*').select{ |f| File.file? f }
-  end
-
   def check
-    m = path.match(%r{.*/([^/]+)/templates/(.+)$})
-    return if m.nil?
+    return if path.match(%r{^\./(:?[^/]+/){2}?templates/.+$}).nil?
 
-    module_name, template_name = m.captures
+    puppetdb = PuppetGhostbuster::PuppetDB.new
 
-    manifests.each do |manifest|
-      return if File.readlines(manifest).grep(%r{["']#{module_name}/#{template_name}["']}).size > 0
-      if match = manifest.match(%r{.*/([^/]+)/manifests/.+$})
-        if match.captures[0] == module_name
-          return if File.readlines(manifest).grep(/["']\$\{module_name\}\/#{template_name}["']/).size > 0
-        end
-      end
+    template_indexes.each do |template_idx|
+      title_token = template_idx[:name_token]
+      title = title_token.value.split('::').map(&:capitalize).join('::')
+
+      return if puppetdb.classes.include? title
+
+      notify :warning, {
+        :message => "Template #{title} seems unused",
+        :line    => title_token.line,
+        :column  => title_token.column,
+      }
     end
-
-    templates.each do |template|
-      return if File.readlines(template).grep(%r{scope.function_template\(\['#{module_name}/#{template_name}'\]\)}).size > 0
-    end
-
-    notify :warning, {
-      :message => "Template #{module_name}/#{template_name} seems unused",
-      :line    => 1,
-      :column  => 1,
-    }
   end
 end
